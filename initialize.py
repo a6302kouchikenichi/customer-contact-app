@@ -148,6 +148,12 @@ def initialize_agent_executor():
             name = ct.SEARCH_WEB_INFO_TOOL_NAME,
             func=search.run,
             description=ct.SEARCH_WEB_INFO_TOOL_DESCRIPTION
+        ),
+        # 営業提案メッセージ生成用のTool
+        Tool(
+            name = ct.GENERATE_SALES_PROPOSAL_TOOL_NAME,
+            func=utils.generate_sales_proposal,
+            description=ct.GENERATE_SALES_PROPOSAL_TOOL_DESCRIPTION
         )
     ]
 

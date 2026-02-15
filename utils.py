@@ -6,6 +6,7 @@
 # ライブラリの読み込み
 ############################################################
 import os
+import json
 from dotenv import load_dotenv
 import streamlit as st
 import logging
@@ -208,6 +209,68 @@ def run_customer_doc_chain(param):
     return ai_msg["answer"]
 
 
+def run_generate_sales_proposal_chain(param):
+    """
+    営業提案メッセージ生成Toolの互換関数
+
+    Args:
+        param: 顧客属性情報（テキスト or JSON文字列）
+
+    Returns:
+        営業提案メッセージ
+    """
+    return generate_sales_proposal(param)
+
+
+def generate_sales_proposal(param):
+    """
+    顧客属性に応じた営業提案メッセージを生成
+
+    Args:
+        param: 顧客属性情報（テキスト or JSON文字列）
+
+    Returns:
+        営業提案メッセージ
+    """
+    # 1) 入力値の正規化
+    customer_profile = param
+    if isinstance(param, str):
+        stripped_param = param.strip()
+        try:
+            loaded = json.loads(stripped_param)
+            if isinstance(loaded, dict):
+                customer_profile = "\n".join([f"- {key}: {value}" for key, value in loaded.items()])
+        except Exception:
+            customer_profile = stripped_param
+
+    # 2) 商品情報（サービス情報）の自動取得
+    service_query = ct.SYSTEM_PROMPT_SALES_PROPOSAL_SERVICE_SUMMARY.format(
+        customer_profile=customer_profile
+    ).strip()
+    service_info = run_service_doc_chain(service_query)
+
+    # 3) 営業提案文の生成
+    proposal_prompt = PromptTemplate(
+        input_variables=["customer_profile", "service_info"],
+        template=ct.SYSTEM_PROMPT_SALES_PROPOSAL.strip()
+    )
+    proposal_chain = LLMChain(llm=st.session_state.llm, prompt=proposal_prompt)
+    proposal_result = proposal_chain.invoke({
+        "customer_profile": customer_profile,
+        "service_info": service_info
+    })
+
+    if isinstance(proposal_result, dict):
+        response = proposal_result.get("text", str(proposal_result))
+    else:
+        response = str(proposal_result)
+
+    # 4) 会話履歴への追加
+    st.session_state.chat_history.extend([HumanMessage(content=str(param)), AIMessage(content=response)])
+
+    return response
+
+
 def delete_old_conversation_log(result):
     """
     古い会話履歴の削除
@@ -345,9 +408,18 @@ def notice_slack(chat_message):
     
     # 問い合わせ内容と関連性が高い従業員情報の中から、SlackIDのみを抽出
     slack_ids = get_slack_ids(target_employees)
+
+    # 問い合わせ内容と関連性が高い従業員情報の中から、名前のみを抽出
+    slack_names = get_slack_names(target_employees)
     
     # 抽出したSlackIDの連結テキストを生成
     slack_id_text = create_slack_id_text(slack_ids)
+
+    # 抽出した名前の連結テキストを生成
+    slack_name_text = create_slack_name_text(slack_names)
+
+    # メンション先の選定理由テキストを生成
+    selection_reason = create_selection_reason(target_employees)
     
     # プロンプトに埋め込むための（問い合わせ内容と関連性が高い）従業員情報テキストを取得
     context = get_context(target_employees)
@@ -357,10 +429,17 @@ def notice_slack(chat_message):
 
     # Slack通知用のプロンプト生成
     prompt = PromptTemplate(
-        input_variables=["slack_id_text", "query", "context", "now_datetime"],
+        input_variables=["slack_id_text", "slack_name_text", "selection_reason", "query", "context", "now_datetime"],
         template=ct.SYSTEM_PROMPT_NOTICE_SLACK,
     )
-    prompt_message = prompt.format(slack_id_text=slack_id_text, query=chat_message, context=context, now_datetime=now_datetime)
+    prompt_message = prompt.format(
+        slack_id_text=slack_id_text,
+        slack_name_text=slack_name_text,
+        selection_reason=selection_reason,
+        query=chat_message,
+        context=context,
+        now_datetime=now_datetime
+    )
 
     # Slack通知の実行
     agent_executor.invoke({"input": prompt_message})
@@ -470,6 +549,37 @@ def get_slack_ids(target_employees):
     return slack_ids
 
 
+def get_slack_names(target_employees):
+    """
+    名前の一覧を取得
+
+    Args:
+        target_employees: 問い合わせ内容と関連性が高い従業員情報一覧
+
+    Returns:
+        名前の一覧
+    """
+    candidate_keys = ["名前", "氏名", "従業員名"]
+    names = []
+
+    for employee in target_employees:
+        row_dict = {}
+        for line in employee.page_content.split("\n"):
+            if ": " not in line:
+                continue
+            key, value = line.split(": ", 1)
+            row_dict[key] = value
+
+        name = "不明"
+        for key in candidate_keys:
+            if key in row_dict and row_dict[key]:
+                name = row_dict[key]
+                break
+        names.append(name)
+
+    return names
+
+
 def create_slack_id_text(slack_ids):
     """
     SlackIDの一覧を取得
@@ -488,6 +598,57 @@ def create_slack_id_text(slack_ids):
             slack_id_text += "と"
     
     return slack_id_text
+
+
+def create_slack_name_text(slack_names):
+    """
+    名前の一覧を連結テキスト化
+
+    Args:
+        slack_names: 名前の一覧
+
+    Returns:
+        名前を「と」で繋いだテキスト
+    """
+    slack_name_text = ""
+    for i, name in enumerate(slack_names):
+        slack_name_text += f"「{name}」"
+        if not i == len(slack_names)-1:
+            slack_name_text += "と"
+
+    return slack_name_text
+
+
+def create_selection_reason(target_employees):
+    """
+    メンション先の選定理由テキストを生成
+
+    Args:
+        target_employees: 問い合わせ内容と関連性が高い従業員情報一覧
+
+    Returns:
+        選定理由テキスト
+    """
+    if not target_employees:
+        return "問い合わせ内容との関連情報が確認できる担当者を特定できなかったため、一次対応可能性を基準に選定しました。"
+
+    reason_texts = []
+    for employee in target_employees:
+        row_dict = {}
+        for line in employee.page_content.split("\n"):
+            if ": " not in line:
+                continue
+            key, value = line.split(": ", 1)
+            row_dict[key] = value
+
+        employee_name = row_dict.get("名前") or row_dict.get("氏名") or row_dict.get("従業員名") or "不明"
+        category = row_dict.get("対応可能な問い合わせカテゴリ", "カテゴリ情報なし")
+        main_task = row_dict.get("現在の主要業務", "主要業務情報なし")
+        reason_texts.append(
+            f"{employee_name}さんは、対応可能カテゴリが「{category}」で、主要業務が「{main_task}」のため関連性が高いと判断しました。"
+        )
+
+    return "\n".join(reason_texts)
 
 
 def get_context(docs):

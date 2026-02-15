@@ -117,6 +117,8 @@ SEARCH_CUSTOMER_COMMUNICATION_INFO_TOOL_NAME = "search_customer_communication_to
 SEARCH_CUSTOMER_COMMUNICATION_INFO_TOOL_DESCRIPTION = "顧客とのやりとりに関する情報を参照したい時に使う"
 SEARCH_WEB_INFO_TOOL_NAME = "search_web_tool"
 SEARCH_WEB_INFO_TOOL_DESCRIPTION = "自社サービス「HealthX」に関する質問で、Web検索が必要と判断した場合に使う"
+GENERATE_SALES_PROPOSAL_TOOL_NAME = "generate_sales_proposal_tool"
+GENERATE_SALES_PROPOSAL_TOOL_DESCRIPTION = "対象顧客の属性に応じて、自社サービスの営業提案メッセージを生成する、商品情報を自動取得して、入力された顧客の特徴にあったメッセージを生成する"
 
 
 # ==========================================
@@ -238,8 +240,11 @@ SYSTEM_PROMPT_NOTICE_SLACK = """
     ・日時: {now_datetime}
 
     --------------------
-
-    【回答・対応案】
+    【メンション先の選定理由】
+    {selection_reason}
+    
+    --------------------
+     【回答・対応案】
     ＜1つ目＞
     ●内容: 
     ●根拠: 
@@ -257,6 +262,41 @@ SYSTEM_PROMPT_NOTICE_SLACK = """
     【参照資料】
     ・従業員情報.csv
     ・問い合わせ履歴.csv
+"""
+
+SYSTEM_PROMPT_SALES_PROPOSAL_SERVICE_SUMMARY = """
+以下の顧客属性に適した自社サービス情報を抽出し、提案に使える要点を整理してください。
+
+【顧客属性】
+{customer_profile}
+
+【出力条件】
+- サービス名
+- 顧客課題との適合ポイント
+- 導入メリット
+- 導入時の注意点
+"""
+
+SYSTEM_PROMPT_SALES_PROPOSAL = """
+あなたはBtoB営業担当です。
+以下の情報を基に、対象顧客に送る営業提案メッセージを日本語で作成してください。
+
+【顧客属性】
+{customer_profile}
+
+【自社サービス情報】
+{service_info}
+
+【作成ルール】
+- 丁寧で自然な営業文面にする
+- 顧客の課題仮説を明示し、それに対する提案を示す
+- 価値訴求は具体的に3点以上
+- 最後に次アクション（打ち合わせ提案など）を1つ入れる
+- 誇張表現・断定的な効果保証は避ける
+
+【出力形式】
+件名:
+本文:
 """
 
 
